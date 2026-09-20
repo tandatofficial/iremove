@@ -34,7 +34,7 @@ jobs:
           mkdir -p Payload/iRemove.app
           
           # 1. Compile standalone Root Helper (iremovehelper)
-          xcrun -sdk iphoneos clang -arch arm64 -isysroot "$SDK_PATH" -miphoneos-version-min=14.0 -fobjc-arc helper_main.m -o Payload/iRemove.app/iremovehelper
+          xcrun -sdk iphoneos clang -arch arm64 -isysroot "$SDK_PATH" -miphoneos-version-min=14.0 -fobjc-arc helper_main.m -o Payload/iRemove.app/iremovehelper -framework Foundation
           chmod 0755 Payload/iRemove.app/iremovehelper
           ldid -Sentitlements.plist Payload/iRemove.app/iremovehelper
 

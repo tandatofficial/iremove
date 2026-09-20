@@ -39,7 +39,7 @@ struct ContentView: View {
                 HStack {
                     Image(systemName: isFilzaDetected ? "checkmark.shield.fill" : "exclamationmark.triangle.fill")
                         .foregroundColor(isFilzaDetected ? .green : .orange)
-                    Text(isFilzaDetected ? "Filza: Đã phát hiện (Quyền can thiệp tối cao)" : "Khuyên dùng: Cài Filza File Manager qua TrollStore")
+                    Text(isFilzaDetected ? "Filza: Đã phát hiện (Sẵn sàng mở thư mục)" : "Khuyên dùng: Cài Filza File Manager qua TrollStore")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(.secondary)
                     Spacer()
@@ -98,7 +98,7 @@ struct ContentView: View {
                                         isShowingRenameSheet = true
                                     },
                                     onOpenFilza: {
-                                        RootHelper.openInFilza(app.path)
+                                        openInFilza(path: app.path)
                                     }
                                 )
                             }
@@ -131,7 +131,7 @@ struct ContentView: View {
                 }
             )
             .onAppear(perform: {
-                self.isFilzaDetected = RootHelper.isFilzaInstalled()
+                self.isFilzaDetected = checkFilzaInstalled()
                 reloadApps()
             })
             .sheet(isPresented: $isShowingRenameSheet) {
@@ -166,7 +166,7 @@ struct ContentView: View {
                             if let app = selectedApp {
                                 Button(action: {
                                     isShowingRenameSheet = false
-                                    RootHelper.openInFilza(app.path)
+                                    openInFilza(path: app.path)
                                 }) {
                                     HStack {
                                         Image(systemName: "folder.fill")
@@ -198,6 +198,23 @@ struct ContentView: View {
         }
     }
 
+    func checkFilzaInstalled() -> Bool {
+        let fm = FileManager.default
+        if fm.fileExists(atPath: "/Applications/Filza.app") {
+            return true
+        }
+        if let url = URL(string: "filza://"), UIApplication.shared.canOpenURL(url) {
+            return true
+        }
+        return false
+    }
+
+    func openInFilza(path: String) {
+        guard let encoded = path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+              let url = URL(string: "filza://\(encoded)") else { return }
+        UIApplication.shared.open(url, options: [:], completionHandler: nil)
+    }
+
     func reloadApps() {
         DispatchQueue.global(qos: .userInitiated).async {
             RootHelper.escalatePrivileges()
@@ -212,7 +229,7 @@ struct ContentView: View {
 
             DispatchQueue.main.async {
                 self.appList = items
-                self.isFilzaDetected = RootHelper.isFilzaInstalled()
+                self.isFilzaDetected = self.checkFilzaInstalled()
             }
         }
     }

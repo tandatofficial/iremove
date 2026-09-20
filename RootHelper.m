@@ -1,5 +1,4 @@
 #import "RootHelper.h"
-#import <UIKit/UIKit.h>
 #import <spawn.h>
 #import <sys/wait.h>
 #import <sys/stat.h>
@@ -27,29 +26,6 @@ extern int posix_spawnattr_set_persona_gid_np(const posix_spawnattr_t* __restric
     seteuid(0);
     setgid(0);
     setegid(0);
-}
-
-+ (BOOL)isFilzaInstalled {
-    NSFileManager *fm = [NSFileManager defaultManager];
-    if ([fm fileExistsAtPath:@"/Applications/Filza.app"]) return YES;
-    
-    NSString *appDir = @"/var/containers/Bundle/Application";
-    NSArray *uuids = [fm contentsOfDirectoryAtPath:appDir error:nil];
-    for (NSString *u in uuids) {
-        NSString *filzaApp = [appDir stringByAppendingPathComponent:[NSString stringWithFormat:@"%@/Filza.app", u]];
-        if ([fm fileExistsAtPath:filzaApp]) return YES;
-    }
-    
-    NSURL *url = [NSURL URLWithString:@"filza://"];
-    return [[UIApplication sharedApplication] canOpenURL:url];
-}
-
-+ (void)openInFilza:(NSString *)path {
-    NSString *encoded = [path stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLPathAllowedCharacterSet]];
-    NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:@"filza://%@", encoded]];
-    dispatch_async(dispatch_get_main_async(), ^{
-        [[UIApplication sharedApplication] openURL:url options:@{} completionHandler:nil];
-    });
 }
 
 + (NSString *)helperPath {

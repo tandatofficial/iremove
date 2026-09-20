@@ -1,0 +1,62 @@
+name: Build iRemove IPA (TrollStore)
+
+on:
+  push:
+    branches: [ "main", "master" ]
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Theos environment
+        uses: actions/cache@v3
+        with:
+          path: ~/theos
+          key: ${{ runner.os }}-theos
+
+      - name: Install dependencies & Theos
+        run: |
+          brew install ldid
+          if [ ! -d "$HOME/theos" ]; then
+            git clone --recursive https://github.com/theos/theos.git ~/theos
+          fi
+
+      - name: Build iRemove Application
+        run: |
+          export THEOS=~/theos
+          cd iremove
+          # Build target
+          mkdir -p Payload/iRemove.app
+          
+          # Compile Obj-C RootHelper & Swift source
+          xcrun -sdk iphoneos clang -arch arm64 -c RootHelper.m -o RootHelper.o -fobjc-arc -miphoneos-version-min=14.0
+          xcrun -sdk iphoneos swiftc -O -target arm64-apple-ios14.0 -import-objc-header iRemove-Bridging-Header.h -emit-executable iRemoveApp.swift ContentView.swift RootHelper.o -o Payload/iRemove.app/iRemove -framework UIKit -framework SwiftUI
+          
+          # Copy Info.plist & sign with ldid
+          cp Info.plist Payload/iRemove.app/Info.plist
+          ldid -Sentitlements.plist Payload/iRemove.app/iRemove
+          
+          # Package into IPA
+          zip -r9 iRemove.ipa Payload
+          ls -la iRemove.ipa
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: iRemove-TrollStore-IPA
+          path: iremove/iRemove.ipa
+
+      - name: Release on Tag
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: iremove/iRemove.ipa
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

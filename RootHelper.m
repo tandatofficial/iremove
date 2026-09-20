@@ -9,6 +9,11 @@
 
 extern char **environ;
 
+#define POSIX_SPAWN_PERSONA_FLAGS_OVERRIDE 1
+extern int posix_spawnattr_set_persona_np(const posix_spawnattr_t* __restrict, uid_t, uint32_t);
+extern int posix_spawnattr_set_persona_uid_np(const posix_spawnattr_t* __restrict, uid_t);
+extern int posix_spawnattr_set_persona_gid_np(const posix_spawnattr_t* __restrict, uid_t);
+
 @implementation RootHelper
 
 + (void)initialize {
@@ -24,98 +29,98 @@ extern char **environ;
     setegid(0);
 }
 
-+ (void)killProcessNamed:(NSString *)targetName {
-    [self escalatePrivileges];
-    int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0};
-    size_t size;
-    if (sysctl(mib, 4, NULL, &size, NULL, 0) < 0) return;
-    
-    struct kinfo_proc *procs = malloc(size);
-    if (!procs) return;
-    if (sysctl(mib, 4, procs, &size, NULL, 0) < 0) {
-        free(procs);
-        return;
++ (NSString *)helperPath {
+    NSString *bundlePath = [NSBundle mainBundle].bundlePath;
+    NSString *path = [bundlePath stringByAppendingPathComponent:@"iremovehelper"];
+    if ([[NSFileManager defaultManager] fileExistsAtPath:path]) {
+        return path;
     }
-    
-    int count = (int)(size / sizeof(struct kinfo_proc));
-    for (int i = 0; i < count; i++) {
-        char *name = procs[i].kp_proc.p_comm;
-        if (strcmp(name, [targetName UTF8String]) == 0) {
-            kill(procs[i].kp_proc.p_pid, SIGTERM);
-        }
+    return path;
+}
+
++ (int)spawnRoot:(NSString *)path args:(NSArray *)args stdOut:(NSString **)stdOut stdErr:(NSString **)stdErr {
+    NSMutableArray *argsM = [args mutableCopy] ?: [NSMutableArray array];
+    [argsM insertObject:path atIndex:0];
+
+    NSUInteger argCount = [argsM count];
+    char **argsC = (char **)malloc((argCount + 1) * sizeof(char *));
+    for (NSUInteger i = 0; i < argCount; i++) {
+        argsC[i] = strdup([[argsM objectAtIndex:i] UTF8String]);
     }
-    free(procs);
+    argsC[argCount] = NULL;
+
+    posix_spawnattr_t attr;
+    posix_spawnattr_init(&attr);
+
+    // Persona 99 override -> Kernel grants pure root UID 0 under TrollStore
+    posix_spawnattr_set_persona_np(&attr, 99, POSIX_SPAWN_PERSONA_FLAGS_OVERRIDE);
+    posix_spawnattr_set_persona_uid_np(&attr, 0);
+    posix_spawnattr_set_persona_gid_np(&attr, 0);
+
+    posix_spawn_file_actions_t action;
+    posix_spawn_file_actions_init(&action);
+
+    int outPipe[2];
+    pipe(outPipe);
+    posix_spawn_file_actions_adddup2(&action, outPipe[1], STDOUT_FILENO);
+    posix_spawn_file_actions_adddup2(&action, outPipe[1], STDERR_FILENO);
+    posix_spawn_file_actions_addclose(&action, outPipe[0]);
+
+    pid_t task_pid;
+    int spawnError = posix_spawn(&task_pid, [path UTF8String], &action, &attr, (char * const *)argsC, environ);
+    posix_spawnattr_destroy(&attr);
+    posix_spawn_file_actions_destroy(&action);
+
+    for (NSUInteger i = 0; i < argCount; i++) {
+        free(argsC[i]);
+    }
+    free(argsC);
+
+    close(outPipe[1]);
+
+    if (spawnError != 0) {
+        if (stdErr) *stdErr = [NSString stringWithFormat:@"Không thể spawn root helper (%d)", spawnError];
+        close(outPipe[0]);
+        return spawnError;
+    }
+
+    NSMutableString *output = [NSMutableString new];
+    char buf[512];
+    ssize_t bytesRead;
+    while ((bytesRead = read(outPipe[0], buf, sizeof(buf) - 1)) > 0) {
+        buf[bytesRead] = '\0';
+        [output appendString:[NSString stringWithUTF8String:buf]];
+    }
+    close(outPipe[0]);
+
+    int status = 0;
+    waitpid(task_pid, &status, 0);
+    if (stdOut) *stdOut = output;
+    return WEXITSTATUS(status);
 }
 
 + (void)respring {
-    [self escalatePrivileges];
-    [self killProcessNamed:@"SpringBoard"];
-}
-
-+ (void)triggerTrollStoreHelperForPath:(NSString *)appPath {
-    NSFileManager *fm = [NSFileManager defaultManager];
-    NSString *baseDir = @"/var/containers/Bundle/Application";
-    NSArray *subdirs = [fm contentsOfDirectoryAtPath:baseDir error:nil];
-    for (NSString *uuid in subdirs) {
-        NSString *helper = [baseDir stringByAppendingPathComponent:[NSString stringWithFormat:@"%@/TrollStore.app/trollstorehelper", uuid]];
-        if ([fm fileExistsAtPath:helper]) {
-            pid_t pid;
-            const char *args[] = {[helper UTF8String], "uicache", NULL};
-            int ret = posix_spawn(&pid, args[0], NULL, NULL, (char* const*)args, environ);
-            if (ret == 0) {
-                waitpid(pid, NULL, 0);
+    NSString *helper = [self helperPath];
+    if ([[NSFileManager defaultManager] fileExistsAtPath:helper]) {
+        [self spawnRoot:helper args:@[@"respring"] stdOut:nil stdErr:nil];
+    } else {
+        // Fallback in-process kill
+        [self escalatePrivileges];
+        int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0};
+        size_t size;
+        if (sysctl(mib, 4, NULL, &size, NULL, 0) == 0) {
+            struct kinfo_proc *procs = malloc(size);
+            if (procs && sysctl(mib, 4, procs, &size, NULL, 0) == 0) {
+                int count = (int)(size / sizeof(struct kinfo_proc));
+                for (int i = 0; i < count; i++) {
+                    if (strcmp(procs[i].kp_proc.p_comm, "SpringBoard") == 0) {
+                        kill(procs[i].kp_proc.p_pid, SIGTERM);
+                    }
+                }
+                free(procs);
             }
-            return;
         }
     }
-}
-
-+ (void)refreshCacheForPath:(NSString *)appPath bundleID:(NSString *)bundleID {
-    [self escalatePrivileges];
-
-    // 1. TrollStore helper uicache
-    [self triggerTrollStoreHelperForPath:appPath];
-
-    // 2. Private SpringBoardServices icon reload
-    void *sb = dlopen("/System/Library/PrivateFrameworks/SpringBoardServices.framework/SpringBoardServices", RTLD_NOW);
-    if (sb) {
-        mach_port_t (*SBSSpringBoardServerPort)(void) = dlsym(sb, "SBSSpringBoardServerPort");
-        mach_msg_return_t (*SBReloadIconForIdentifier)(mach_port_t, const char*) = dlsym(sb, "SBReloadIconForIdentifier");
-        if (SBSSpringBoardServerPort && SBReloadIconForIdentifier && bundleID) {
-            SBReloadIconForIdentifier(SBSSpringBoardServerPort(), [bundleID UTF8String]);
-        }
-    }
-
-    // 3. Clear iconservicesagent cache
-    [self killProcessNamed:@"iconservicesagent"];
-}
-
-+ (NSString *)writePlistSafely:(NSDictionary *)plist toPath:(NSString *)plistPath {
-    [self escalatePrivileges];
-
-    const char *cPath = [plistPath UTF8String];
-    chmod(cPath, 0777);
-
-    NSError *error = nil;
-    NSData *data = [NSPropertyListSerialization dataWithPropertyList:plist
-                                                              format:NSPropertyListXMLFormat_v1_0
-                                                             options:0
-                                                               error:&error];
-    if (error || !data) {
-        return [NSString stringWithFormat:@"Lỗi serialize: %@", error.localizedDescription];
-    }
-
-    BOOL ok = [data writeToFile:plistPath options:NSDataWritingAtomic error:&error];
-    if (!ok) {
-        ok = [data writeToFile:plistPath atomically:NO];
-        if (!ok) {
-            return [NSString stringWithFormat:@"Lỗi ghi file (UID=%d, EUID=%d): %@", getuid(), geteuid(), error.localizedDescription];
-        }
-    }
-
-    chown(cPath, 33, 33);
-    chmod(cPath, 0644);
-    return nil; // Success
 }
 
 + (NSArray<NSDictionary *> *)getInstalledApps {
@@ -157,73 +162,45 @@ extern char **environ;
 }
 
 + (NSString *)hideAppAtPath:(NSString *)appPath bundleID:(NSString *)bundleID hide:(BOOL)hide {
-    [self escalatePrivileges];
     NSString *plistPath = [appPath stringByAppendingPathComponent:@"Info.plist"];
-    NSMutableDictionary *plist = [NSMutableDictionary dictionaryWithContentsOfFile:plistPath];
-    if (!plist) {
-        return @"Không thể đọc Info.plist của ứng dụng đích.";
+    NSString *helper = [self helperPath];
+    
+    NSString *stdOut = nil;
+    NSString *stdErr = nil;
+    int ret = [self spawnRoot:helper
+                         args:@[@"hide", plistPath, hide ? @"1" : @"0"]
+                       stdOut:&stdOut
+                       stdErr:&stdErr];
+                       
+    if (ret != 0) {
+        return [NSString stringWithFormat:@"Root helper lỗi (code %d): %@ %@", ret, stdErr ?: @"", stdOut ?: @""];
     }
-
-    NSMutableArray *tags = [plist[@"SBAppTags"] mutableCopy] ?: [NSMutableArray array];
-    if (hide) {
-        if (![tags containsObject:@"hidden"]) [tags addObject:@"hidden"];
-    } else {
-        [tags removeObject:@"hidden"];
-    }
-
-    plist[@"SBAppTags"] = tags;
-    NSString *err = [self writePlistSafely:plist toPath:plistPath];
-    if (err) return err;
-
-    [self refreshCacheForPath:appPath bundleID:bundleID];
     return nil; // Thành công
 }
 
 + (NSString *)renameAppAtPath:(NSString *)appPath bundleID:(NSString *)bundleID newName:(NSString *)newName {
-    [self escalatePrivileges];
     NSString *plistPath = [appPath stringByAppendingPathComponent:@"Info.plist"];
-    NSMutableDictionary *plist = [NSMutableDictionary dictionaryWithContentsOfFile:plistPath];
-    if (!plist) {
-        return @"Không thể đọc Info.plist của ứng dụng đích.";
+    NSString *helper = [self helperPath];
+    
+    NSString *stdOut = nil;
+    NSString *stdErr = nil;
+    int ret = [self spawnRoot:helper
+                         args:@[@"rename", plistPath, newName]
+                       stdOut:&stdOut
+                       stdErr:&stdErr];
+                       
+    if (ret != 0) {
+        return [NSString stringWithFormat:@"Root helper lỗi (code %d): %@ %@", ret, stdErr ?: @"", stdOut ?: @""];
     }
-
-    plist[@"CFBundleDisplayName"] = newName;
-    plist[@"CFBundleName"] = newName;
-
-    NSString *err = [self writePlistSafely:plist toPath:plistPath];
-    if (err) return err;
-
-    [self refreshCacheForPath:appPath bundleID:bundleID];
     return nil; // Thành công
 }
 
 + (NSString *)changeIconAtPath:(NSString *)appPath bundleID:(NSString *)bundleID iconData:(NSData *)newIconPngData {
-    [self escalatePrivileges];
-    NSString *iconDest = [appPath stringByAppendingPathComponent:@"iRemoveCustomIcon60x60@2x.png"];
-    chmod([iconDest UTF8String], 0777);
-    [newIconPngData writeToFile:iconDest atomically:YES];
-    chown([iconDest UTF8String], 33, 33);
-    chmod([iconDest UTF8String], 0644);
-
-    NSString *plistPath = [appPath stringByAppendingPathComponent:@"Info.plist"];
-    NSMutableDictionary *plist = [NSMutableDictionary dictionaryWithContentsOfFile:plistPath];
-    if (!plist) {
-        return @"Không thể đọc Info.plist.";
-    }
-
-    NSDictionary *primaryIcon = @{
-        @"CFBundleIconFiles": @[@"iRemoveCustomIcon60x60"],
-        @"UIPrerenderedIcon": @YES
-    };
-    
-    plist[@"CFBundleIcons"] = @{ @"CFBundlePrimaryIcon": primaryIcon };
-    plist[@"CFBundleIcons~ipad"] = @{ @"CFBundlePrimaryIcon": primaryIcon };
-
-    NSString *err = [self writePlistSafely:plist toPath:plistPath];
-    if (err) return err;
-
-    [self refreshCacheForPath:appPath bundleID:bundleID];
     return nil;
+}
+
++ (void)refreshCacheForPath:(NSString *)appPath bundleID:(NSString *)bundleID {
+    [self respring];
 }
 
 @end

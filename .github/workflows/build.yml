@@ -33,17 +33,22 @@ jobs:
           SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
           mkdir -p Payload/iRemove.app
           
-          # Compile Obj-C RootHelper
+          # 1. Compile standalone Root Helper (iremovehelper)
+          xcrun -sdk iphoneos clang -arch arm64 -isysroot "$SDK_PATH" -miphoneos-version-min=14.0 -fobjc-arc helper_main.m -o Payload/iRemove.app/iremovehelper
+          chmod 0755 Payload/iRemove.app/iremovehelper
+          ldid -Sentitlements.plist Payload/iRemove.app/iremovehelper
+
+          # 2. Compile Obj-C RootHelper wrapper for GUI
           xcrun -sdk iphoneos clang -arch arm64 -isysroot "$SDK_PATH" -miphoneos-version-min=14.0 -fobjc-arc -c RootHelper.m -o RootHelper.o
           
-          # Compile Swift sources & link
+          # 3. Compile Swift sources & link main app
           xcrun -sdk iphoneos swiftc -O -target arm64-apple-ios14.0 -sdk "$SDK_PATH" -import-objc-header iRemove-Bridging-Header.h -emit-executable iRemoveApp.swift ContentView.swift RootHelper.o -o Payload/iRemove.app/iRemove -framework UIKit -framework SwiftUI
           
-          # Copy Info.plist & sign with ldid
+          # 4. Copy Info.plist & sign main app
           cp Info.plist Payload/iRemove.app/Info.plist
           ldid -Sentitlements.plist Payload/iRemove.app/iRemove
           
-          # Package into IPA
+          # 5. Package into IPA
           zip -r9 iRemove.ipa Payload
           ls -la iRemove.ipa
 

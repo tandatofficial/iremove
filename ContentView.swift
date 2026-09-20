@@ -12,12 +12,12 @@ struct ContentView: View {
     @State private var searchText: String = ""
     @State private var selectedApp: AppModel?
     @State private var renameTargetName: String = ""
-    @State private var isShowingRenameAlert: Bool = false
+    @State private var isShowingRenameSheet: Bool = false
     @State private var statusMessage: String = ""
     @State private var isShowingStatus: Bool = false
 
     var filteredApps: [AppModel] {
-        if searchText.isEmpty {
+        if searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return appList
         } else {
             return appList.filter {
@@ -29,18 +29,38 @@ struct ContentView: View {
 
     var body: some View {
         NavigationView {
-            ZStack {
-                Color(UIColor.systemGroupedBackground).ignoresSafeArea()
+            VStack(spacing: 0) {
+                // Search Bar (iOS 14+ compatible)
+                HStack {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundColor(.gray)
+                    TextField("Tìm tên hoặc Bundle ID...", text: $searchText)
+                        .autocapitalization(.none)
+                        .disableAutocorrection(true)
+                    if !searchText.isEmpty {
+                        Button(action: { searchText = "" }) {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundColor(.gray)
+                        }
+                    }
+                }
+                .padding(8)
+                .background(Color(UIColor.secondarySystemBackground))
+                .cornerRadius(10)
+                .padding(.horizontal)
+                .padding(.vertical, 8)
 
                 if appList.isEmpty {
+                    Spacer()
                     VStack(spacing: 12) {
                         ProgressView()
                         Text("Đang quét danh sách ứng dụng...")
                             .foregroundColor(.secondary)
                     }
+                    Spacer()
                 } else {
                     List {
-                        Section(header: Text("Ứng dụng cài đặt (\(filteredApps.count))")) {
+                        Section(header: Text("Ứng dụng đã cài đặt (\(filteredApps.count))")) {
                             ForEach(filteredApps) { app in
                                 AppRow(
                                     app: app,
@@ -55,43 +75,59 @@ struct ContentView: View {
                                     onRename: {
                                         selectedApp = app
                                         renameTargetName = app.name
-                                        isShowingRenameAlert = true
+                                        isShowingRenameSheet = true
                                     }
                                 )
                             }
                         }
                     }
-                    .listStyle(.insetGrouped)
-                    .searchable(text: $searchText, prompt: "Tìm tên ứng dụng hoặc Bundle ID")
+                    .listStyle(InsetGroupedListStyle())
                 }
             }
             .navigationTitle("iRemove")
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: reloadApps) {
-                        Image(systemName: "arrow.clockwise")
-                    }
+            .navigationBarItems(
+                trailing: Button(action: reloadApps) {
+                    Image(systemName: "arrow.clockwise")
                 }
-            }
+            )
             .onAppear(perform: reloadApps)
-            .alert("Đổi tên ứng dụng", isPresented: $isShowingRenameAlert) {
-                TextField("Tên mới", text: $renameTargetName)
-                Button("Lưu") {
-                    if let app = selectedApp, !renameTargetName.isEmpty {
-                        let success = RootHelper.renameApp(atPath: app.path, newName: renameTargetName)
-                        if success {
-                            statusMessage = "Đã đổi tên thành: \(renameTargetName)"
-                            isShowingStatus = true
-                            reloadApps()
+            .sheet(isPresented: $isShowingRenameSheet) {
+                NavigationView {
+                    Form {
+                        Section(header: Text("Tên ứng dụng mới")) {
+                            TextField("Nhập tên mới", text: $renameTargetName)
+                        }
+                        Section {
+                            Button(action: {
+                                if let app = selectedApp, !renameTargetName.isEmpty {
+                                    let success = RootHelper.renameApp(atPath: app.path, newName: renameTargetName)
+                                    isShowingRenameSheet = false
+                                    if success {
+                                        statusMessage = "Đã đổi tên thành: \(renameTargetName)"
+                                        isShowingStatus = true
+                                        reloadApps()
+                                    }
+                                }
+                            }) {
+                                Text("Lưu thay đổi")
+                                    .fontWeight(.bold)
+                            }
                         }
                     }
+                    .navigationTitle("Đổi tên ứng dụng")
+                    .navigationBarItems(
+                        leading: Button("Hủy") {
+                            isShowingRenameSheet = false
+                        }
+                    )
                 }
-                Button("Hủy", role: .cancel) {}
-            } message: {
-                Text("Tên mới sẽ cập nhật sau khi SpringBoard reload cache.")
             }
-            .alert(statusMessage, isPresented: $isShowingStatus) {
-                Button("OK", role: .cancel) {}
+            .alert(isPresented: $isShowingStatus) {
+                Alert(
+                    title: Text("Thông báo"),
+                    message: Text(statusMessage),
+                    dismissButton: .default(Text("OK"))
+                )
             }
         }
     }

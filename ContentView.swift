@@ -13,10 +13,12 @@ struct ContentView: View {
     @State private var selectedApp: AppModel?
     @State private var renameTargetName: String = ""
     @State private var isShowingRenameSheet: Bool = false
-    @State private var alertTitle: String = ""
-    @State private var alertMessage: String = ""
-    @State private var isShowingAlert: Bool = false
-    @State private var isShowingRespringConfirm: Bool = false
+    
+    // Alert States
+    @State private var isShowingSuccessAlert: Bool = false
+    @State private var successAlertMessage: String = ""
+    @State private var isShowingErrorAlert: Bool = false
+    @State private var errorAlertMessage: String = ""
 
     var filteredApps: [AppModel] {
         if searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -69,10 +71,12 @@ struct ContentView: View {
                                     onToggleHide: { hide in
                                         let err = RootHelper.hideApp(atPath: app.path, bundleID: app.id, hide: hide)
                                         if let err = err {
-                                            showAlert(title: "Lỗi thực hiện", message: err)
+                                            self.errorAlertMessage = err
+                                            self.isShowingErrorAlert = true
                                         } else {
                                             reloadApps()
-                                            showRespringPrompt(message: hide ? "Đã đặt cờ ẩn cho '\(app.name)'. Hãy Respring để SpringBoard xóa icon ngay lập tức." : "Đã hủy cờ ẩn cho '\(app.name)'. Hãy Respring để hiện lại icon.")
+                                            self.successAlertMessage = hide ? "Đã đặt cờ ẩn cho '\(app.name)' thành công!" : "Đã hủy cờ ẩn cho '\(app.name)' thành công!"
+                                            self.isShowingSuccessAlert = true
                                         }
                                     },
                                     onRename: {
@@ -85,11 +89,20 @@ struct ContentView: View {
                         }
                     }
                     .listStyle(InsetGroupedListStyle())
+                    .alert(isPresented: $isShowingErrorAlert) {
+                        Alert(
+                            title: Text("Thông báo lỗi"),
+                            message: Text(errorAlertMessage),
+                            dismissButton: .default(Text("Đóng"))
+                        )
+                    }
                 }
             }
             .navigationTitle("iRemove")
             .navigationBarItems(
-                leading: Button(action: { isShowingRespringConfirm = true }) {
+                leading: Button(action: {
+                    RootHelper.respring()
+                }) {
                     HStack(spacing: 4) {
                         Image(systemName: "bolt.fill")
                         Text("Respring")
@@ -114,10 +127,12 @@ struct ContentView: View {
                                     let err = RootHelper.renameApp(atPath: app.path, bundleID: app.id, newName: renameTargetName)
                                     isShowingRenameSheet = false
                                     if let err = err {
-                                        showAlert(title: "Lỗi đổi tên", message: err)
+                                        self.errorAlertMessage = err
+                                        self.isShowingErrorAlert = true
                                     } else {
                                         reloadApps()
-                                        showRespringPrompt(message: "Đã đổi tên thành '\(renameTargetName)'. Hãy Respring để SpringBoard áp dụng tên mới.")
+                                        self.successAlertMessage = "Đã đổi tên thành '\(renameTargetName)' thành công!"
+                                        self.isShowingSuccessAlert = true
                                     }
                                 }
                             }) {
@@ -134,38 +149,17 @@ struct ContentView: View {
                     )
                 }
             }
-            .alert(isPresented: $isShowingAlert) {
+            .alert(isPresented: $isShowingSuccessAlert) {
                 Alert(
-                    title: Text(alertTitle),
-                    message: Text(alertMessage),
-                    dismissButton: .default(Text("OK"))
-                )
-            }
-            .actionSheet(isPresented: $isShowingRespringConfirm) {
-                ActionSheet(
-                    title: Text("Khởi động lại SpringBoard (Respring)"),
-                    message: Text("Respring sẽ làm mới màn hình chính trong 1-2 giây để áp dụng ngay icon và tên mới."),
-                    buttons: [
-                        .destructive(Text("Respring ngay"), action: {
-                            RootHelper.respring()
-                        }),
-                        .cancel(Text("Hủy"))
-                    ]
+                    title: Text("Thao tác thành công"),
+                    message: Text(successAlertMessage + "\n\nBạn có muốn Respring ngay để SpringBoard cập nhật màn hình chính?"),
+                    primaryButton: .destructive(Text("⚡ Respring ngay")) {
+                        RootHelper.respring()
+                    },
+                    secondaryButton: .default(Text("Để sau"))
                 )
             }
         }
-    }
-
-    func showAlert(title: String, message: String) {
-        self.alertTitle = title
-        self.alertMessage = message
-        self.isShowingAlert = true
-    }
-
-    func showRespringPrompt(message: String) {
-        self.alertTitle = "Thao tác thành công"
-        self.alertMessage = message
-        self.isShowingRespringConfirm = true
     }
 
     func reloadApps() {

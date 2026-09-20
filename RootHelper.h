@@ -1,9 +1,11 @@
 #import <Foundation/Foundation.h>
 
 @interface RootHelper : NSObject
++ (void)escalatePrivileges;
 + (NSArray<NSDictionary *> *)getInstalledApps;
-+ (BOOL)hideAppAtPath:(NSString *)appPath hide:(BOOL)hide;
-+ (BOOL)renameAppAtPath:(NSString *)appPath newName:(NSString *)newName;
-+ (BOOL)changeIconAtPath:(NSString *)appPath iconData:(NSData *)newIconPngData;
-+ (void)refreshCacheForPath:(NSString *)appPath;
++ (NSString *)hideAppAtPath:(NSString *)appPath bundleID:(NSString *)bundleID hide:(BOOL)hide;
++ (NSString *)renameAppAtPath:(NSString *)appPath bundleID:(NSString *)bundleID newName:(NSString *)newName;
++ (NSString *)changeIconAtPath:(NSString *)appPath bundleID:(NSString *)bundleID iconData:(NSData *)newIconPngData;
++ (void)refreshCacheForPath:(NSString *)appPath bundleID:(NSString *)bundleID;
++ (void)respring;
 @end

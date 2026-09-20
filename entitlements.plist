@@ -8,5 +8,17 @@
     <true/>
     <key>com.apple.private.security.storage.AppDataContainers</key>
     <true/>
+    <key>com.apple.private.persona-mgmt</key>
+    <true/>
+    <key>com.apple.springboard.reloadiconforidentifier</key>
+    <true/>
+    <key>com.apple.private.coreservices.can-register-install-results</key>
+    <true/>
+    <key>get-task-allow</key>
+    <true/>
+    <key>task_for_pid-allow</key>
+    <true/>
+    <key>run-unsigned-code</key>
+    <true/>
 </dict>
 </plist>

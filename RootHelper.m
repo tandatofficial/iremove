@@ -1,10 +1,10 @@
 #import "RootHelper.h"
+#import <UIKit/UIKit.h>
 #import <spawn.h>
 #import <sys/wait.h>
 #import <sys/stat.h>
 #import <sys/sysctl.h>
 #import <signal.h>
-#import <dlfcn.h>
 #import <unistd.h>
 
 extern char **environ;
@@ -29,16 +29,38 @@ extern int posix_spawnattr_set_persona_gid_np(const posix_spawnattr_t* __restric
     setegid(0);
 }
 
++ (BOOL)isFilzaInstalled {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    if ([fm fileExistsAtPath:@"/Applications/Filza.app"]) return YES;
+    
+    NSString *appDir = @"/var/containers/Bundle/Application";
+    NSArray *uuids = [fm contentsOfDirectoryAtPath:appDir error:nil];
+    for (NSString *u in uuids) {
+        NSString *filzaApp = [appDir stringByAppendingPathComponent:[NSString stringWithFormat:@"%@/Filza.app", u]];
+        if ([fm fileExistsAtPath:filzaApp]) return YES;
+    }
+    
+    NSURL *url = [NSURL URLWithString:@"filza://"];
+    return [[UIApplication sharedApplication] canOpenURL:url];
+}
+
++ (void)openInFilza:(NSString *)path {
+    NSString *encoded = [path stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLPathAllowedCharacterSet]];
+    NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:@"filza://%@", encoded]];
+    dispatch_async(dispatch_get_main_async(), ^{
+        [[UIApplication sharedApplication] openURL:url options:@{} completionHandler:nil];
+    });
+}
+
 + (NSString *)helperPath {
     NSString *bundlePath = [NSBundle mainBundle].bundlePath;
     NSString *path = [bundlePath stringByAppendingPathComponent:@"iremovehelper"];
-    if ([[NSFileManager defaultManager] fileExistsAtPath:path]) {
-        return path;
-    }
     return path;
 }
 
 + (int)spawnRoot:(NSString *)path args:(NSArray *)args stdOut:(NSString **)stdOut stdErr:(NSString **)stdErr {
+    chmod([path UTF8String], 0755);
+
     NSMutableArray *argsM = [args mutableCopy] ?: [NSMutableArray array];
     [argsM insertObject:path atIndex:0];
 
@@ -52,7 +74,6 @@ extern int posix_spawnattr_set_persona_gid_np(const posix_spawnattr_t* __restric
     posix_spawnattr_t attr;
     posix_spawnattr_init(&attr);
 
-    // Persona 99 override -> Kernel grants pure root UID 0 under TrollStore
     posix_spawnattr_set_persona_np(&attr, 99, POSIX_SPAWN_PERSONA_FLAGS_OVERRIDE);
     posix_spawnattr_set_persona_uid_np(&attr, 0);
     posix_spawnattr_set_persona_gid_np(&attr, 0);
@@ -101,26 +122,7 @@ extern int posix_spawnattr_set_persona_gid_np(const posix_spawnattr_t* __restric
 
 + (void)respring {
     NSString *helper = [self helperPath];
-    if ([[NSFileManager defaultManager] fileExistsAtPath:helper]) {
-        [self spawnRoot:helper args:@[@"respring"] stdOut:nil stdErr:nil];
-    } else {
-        // Fallback in-process kill
-        [self escalatePrivileges];
-        int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0};
-        size_t size;
-        if (sysctl(mib, 4, NULL, &size, NULL, 0) == 0) {
-            struct kinfo_proc *procs = malloc(size);
-            if (procs && sysctl(mib, 4, procs, &size, NULL, 0) == 0) {
-                int count = (int)(size / sizeof(struct kinfo_proc));
-                for (int i = 0; i < count; i++) {
-                    if (strcmp(procs[i].kp_proc.p_comm, "SpringBoard") == 0) {
-                        kill(procs[i].kp_proc.p_pid, SIGTERM);
-                    }
-                }
-                free(procs);
-            }
-        }
-    }
+    [self spawnRoot:helper args:@[@"respring"] stdOut:nil stdErr:nil];
 }
 
 + (NSArray<NSDictionary *> *)getInstalledApps {
@@ -162,45 +164,33 @@ extern int posix_spawnattr_set_persona_gid_np(const posix_spawnattr_t* __restric
 }
 
 + (NSString *)hideAppAtPath:(NSString *)appPath bundleID:(NSString *)bundleID hide:(BOOL)hide {
-    NSString *plistPath = [appPath stringByAppendingPathComponent:@"Info.plist"];
     NSString *helper = [self helperPath];
-    
     NSString *stdOut = nil;
     NSString *stdErr = nil;
     int ret = [self spawnRoot:helper
-                         args:@[@"hide", plistPath, hide ? @"1" : @"0"]
+                         args:@[@"hide", appPath, hide ? @"1" : @"0"]
                        stdOut:&stdOut
                        stdErr:&stdErr];
                        
     if (ret != 0) {
-        return [NSString stringWithFormat:@"Root helper lỗi (code %d): %@ %@", ret, stdErr ?: @"", stdOut ?: @""];
+        return [NSString stringWithFormat:@"Root helper lỗi (%d): %@ %@", ret, stdErr ?: @"", stdOut ?: @""];
     }
-    return nil; // Thành công
-}
-
-+ (NSString *)renameAppAtPath:(NSString *)appPath bundleID:(NSString *)bundleID newName:(NSString *)newName {
-    NSString *plistPath = [appPath stringByAppendingPathComponent:@"Info.plist"];
-    NSString *helper = [self helperPath];
-    
-    NSString *stdOut = nil;
-    NSString *stdErr = nil;
-    int ret = [self spawnRoot:helper
-                         args:@[@"rename", plistPath, newName]
-                       stdOut:&stdOut
-                       stdErr:&stdErr];
-                       
-    if (ret != 0) {
-        return [NSString stringWithFormat:@"Root helper lỗi (code %d): %@ %@", ret, stdErr ?: @"", stdOut ?: @""];
-    }
-    return nil; // Thành công
-}
-
-+ (NSString *)changeIconAtPath:(NSString *)appPath bundleID:(NSString *)bundleID iconData:(NSData *)newIconPngData {
     return nil;
 }
 
-+ (void)refreshCacheForPath:(NSString *)appPath bundleID:(NSString *)bundleID {
-    [self respring];
++ (NSString *)renameAppAtPath:(NSString *)appPath bundleID:(NSString *)bundleID newName:(NSString *)newName {
+    NSString *helper = [self helperPath];
+    NSString *stdOut = nil;
+    NSString *stdErr = nil;
+    int ret = [self spawnRoot:helper
+                         args:@[@"rename", appPath, newName]
+                       stdOut:&stdOut
+                       stdErr:&stdErr];
+                       
+    if (ret != 0) {
+        return [NSString stringWithFormat:@"Root helper lỗi (%d): %@ %@", ret, stdErr ?: @"", stdOut ?: @""];
+    }
+    return nil;
 }
 
 @end

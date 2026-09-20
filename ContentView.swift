@@ -13,6 +13,7 @@ struct ContentView: View {
     @State private var selectedApp: AppModel?
     @State private var renameTargetName: String = ""
     @State private var isShowingRenameSheet: Bool = false
+    @State private var isFilzaDetected: Bool = false
     
     // Alert States
     @State private var isShowingSuccessAlert: Bool = false
@@ -34,6 +35,18 @@ struct ContentView: View {
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
+                // Filza Status Banner
+                HStack {
+                    Image(systemName: isFilzaDetected ? "checkmark.shield.fill" : "exclamationmark.triangle.fill")
+                        .foregroundColor(isFilzaDetected ? .green : .orange)
+                    Text(isFilzaDetected ? "Filza: Đã phát hiện (Quyền can thiệp tối cao)" : "Khuyên dùng: Cài Filza File Manager qua TrollStore")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.secondary)
+                    Spacer()
+                }
+                .padding(.horizontal)
+                .padding(.top, 4)
+
                 // Search Bar
                 HStack {
                     Image(systemName: "magnifyingglass")
@@ -83,6 +96,9 @@ struct ContentView: View {
                                         selectedApp = app
                                         renameTargetName = app.name
                                         isShowingRenameSheet = true
+                                    },
+                                    onOpenFilza: {
+                                        RootHelper.openInFilza(app.path)
                                     }
                                 )
                             }
@@ -114,14 +130,18 @@ struct ContentView: View {
                     Image(systemName: "arrow.clockwise")
                 }
             )
-            .onAppear(perform: reloadApps)
+            .onAppear(perform: {
+                self.isFilzaDetected = RootHelper.isFilzaInstalled()
+                reloadApps()
+            })
             .sheet(isPresented: $isShowingRenameSheet) {
                 NavigationView {
                     Form {
                         Section(header: Text("Tên ứng dụng mới")) {
                             TextField("Nhập tên mới", text: $renameTargetName)
                         }
-                        Section {
+                        
+                        Section(header: Text("Thao tác can thiệp")) {
                             Button(action: {
                                 if let app = selectedApp, !renameTargetName.isEmpty {
                                     let err = RootHelper.renameApp(atPath: app.path, bundleID: app.id, newName: renameTargetName)
@@ -131,13 +151,29 @@ struct ContentView: View {
                                         self.isShowingErrorAlert = true
                                     } else {
                                         reloadApps()
-                                        self.successAlertMessage = "Đã đổi tên thành '\(renameTargetName)' thành công!"
+                                        self.successAlertMessage = "Đã đổi tên thành '\(renameTargetName)' trong Info.plist & tất cả ngôn ngữ (.lproj)!"
                                         self.isShowingSuccessAlert = true
                                     }
                                 }
                             }) {
-                                Text("Lưu thay đổi")
-                                    .fontWeight(.bold)
+                                HStack {
+                                    Image(systemName: "pencil.circle.fill")
+                                    Text("Đổi tên tự động & Cập nhật ngôn ngữ")
+                                        .fontWeight(.bold)
+                                }
+                            }
+
+                            if let app = selectedApp {
+                                Button(action: {
+                                    isShowingRenameSheet = false
+                                    RootHelper.openInFilza(app.path)
+                                }) {
+                                    HStack {
+                                        Image(systemName: "folder.fill")
+                                        Text("Mở thư mục app trong Filza")
+                                    }
+                                    .foregroundColor(.blue)
+                                }
                             }
                         }
                     }
@@ -152,7 +188,7 @@ struct ContentView: View {
             .alert(isPresented: $isShowingSuccessAlert) {
                 Alert(
                     title: Text("Thao tác thành công"),
-                    message: Text(successAlertMessage + "\n\nBạn có muốn Respring ngay để SpringBoard cập nhật màn hình chính?"),
+                    message: Text(successAlertMessage + "\n\nBạn có muốn Respring ngay để SpringBoard cập nhật lại tên/icon?"),
                     primaryButton: .destructive(Text("⚡ Respring ngay")) {
                         RootHelper.respring()
                     },
@@ -176,6 +212,7 @@ struct ContentView: View {
 
             DispatchQueue.main.async {
                 self.appList = items
+                self.isFilzaDetected = RootHelper.isFilzaInstalled()
             }
         }
     }
@@ -185,6 +222,7 @@ struct AppRow: View {
     let app: AppModel
     let onToggleHide: (Bool) -> Void
     let onRename: () -> Void
+    let onOpenFilza: () -> Void
 
     var body: some View {
         HStack {
@@ -215,6 +253,9 @@ struct AppRow: View {
                 }
                 Button(action: onRename) {
                     Label("Đổi tên ứng dụng", systemImage: "pencil")
+                }
+                Button(action: onOpenFilza) {
+                    Label("Mở thư mục trong Filza", systemImage: "folder")
                 }
             } label: {
                 Image(systemName: "ellipsis.circle")

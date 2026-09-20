@@ -30,14 +30,14 @@ jobs:
 
       - name: Build iRemove Application
         run: |
-          export THEOS=~/theos
-          cd iremove
-          # Build target
+          SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
           mkdir -p Payload/iRemove.app
           
-          # Compile Obj-C RootHelper & Swift source
-          xcrun -sdk iphoneos clang -arch arm64 -c RootHelper.m -o RootHelper.o -fobjc-arc -miphoneos-version-min=14.0
-          xcrun -sdk iphoneos swiftc -O -target arm64-apple-ios14.0 -import-objc-header iRemove-Bridging-Header.h -emit-executable iRemoveApp.swift ContentView.swift RootHelper.o -o Payload/iRemove.app/iRemove -framework UIKit -framework SwiftUI
+          # Compile Obj-C RootHelper
+          xcrun -sdk iphoneos clang -arch arm64 -isysroot "$SDK_PATH" -miphoneos-version-min=14.0 -fobjc-arc -c RootHelper.m -o RootHelper.o
+          
+          # Compile Swift sources & link
+          xcrun -sdk iphoneos swiftc -O -target arm64-apple-ios14.0 -sdk "$SDK_PATH" -import-objc-header iRemove-Bridging-Header.h -emit-executable iRemoveApp.swift ContentView.swift RootHelper.o -o Payload/iRemove.app/iRemove -framework UIKit -framework SwiftUI
           
           # Copy Info.plist & sign with ldid
           cp Info.plist Payload/iRemove.app/Info.plist
@@ -51,12 +51,12 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: iRemove-TrollStore-IPA
-          path: iremove/iRemove.ipa
+          path: iRemove.ipa
 
       - name: Release on Tag
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1
         with:
-          files: iremove/iRemove.ipa
+          files: iRemove.ipa
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
